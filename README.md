@@ -42,7 +42,7 @@ The project wraps EPICS process variables, an RTC6 galvo scanhead (via `rtc6-fas
 - **Stage and goniometer control** — X / Y / Z linear stages, sample Y / Z, and omega rotation, all driven through EPICS PVs (see [bin/pv.py](bin/pv.py)).
 - **Robot handling** — load / unload / soak / dispose / dry / home controls for the sample robot.
 - **High-mag optics** — zoom and focus controls with tweak-step support.
-- **Laser control** — REST client for the Light Conversion Carbide and Pharos femtosecond lasers (see [bin/laserControl.py](bin/laserControl.py) and [CarbideRestApi.html](CarbideRestApi.html)).
+- **Laser control** — Carbide femtosecond laser control over EPICS PVs, served by the [carbide-fastcs](https://github.com/armin306/carbide-fastcs) IOC (which owns the REST communication to the laser; see `commandLaser`/`LaserStatusThread` in [bin/guiv4_prod.py](bin/guiv4_prod.py) and [CarbideRestApi.html](CarbideRestApi.html) for the underlying vendor API). Pharos was referenced in the old REST wrapper's comments but never had an implemented control path.
 - **RTC6 galvo integration** — shape cutting via `rtc6-fastcs` (Linux only).
 - **Bluesky / BlueAPI modes** — optional execution of `mx_bluesky.beamlines.aithre_lasershaping` plans against a running RunEngine or a BlueAPI REST worker.
 - **Cross-platform logging** — per-day log files (`DDMMYYYY.log`) written to CWD alongside stdout.
@@ -57,8 +57,7 @@ lasershaping/
 │   ├── guiv4_3_0.ui         Qt Designer UI source
 │   ├── control.py           caget / caput / cagetstring wrappers
 │   ├── pv.py                Central list of EPICS PVs for the beamline
-│   ├── laserControl.py      REST client for Carbide / Pharos lasers
-│   ├── laserControlAsync.py httpx-based async variant
+│   │                        (includes CARBIDE:* PVs for carbide-fastcs)
 │   ├── centerpin.py         Pin-tip centring via OpenCV + ophyd
 │   ├── guiv4_2_5.py, guiv4_2_6*.py  Previous GUI versions kept for reference
 │   └── *.png                UI assets (icon, arrow buttons)
@@ -85,7 +84,7 @@ lasershaping/
 Core Python packages (see [pyproject.toml](pyproject.toml)):
 
 ```
-pyqt5, opencv-python-headless, numpy, requests, httpx, qasync, zmq,
+pyqt5, opencv-python-headless, numpy, qasync, zmq,
 bluesky, ophyd, ophyd-async, softioc, mx-bluesky, blueapi   (Linux only)
 ```
 
@@ -93,6 +92,9 @@ Additional system-level dependencies on Linux:
 
 - EPICS base (`caget`, `caput`, `cainfo` must be on PATH — [bin/control.py](bin/control.py) shells out to them).
 - A local checkout of `rtc6-fastcs` installed via `pip install ../path/to/rtc6-fastcs`.
+- A running [carbide-fastcs](https://github.com/armin306/carbide-fastcs) IOC reachable over Channel Access (PV prefix `CARBIDE:`) — needed for `commandLaser`/`LaserStatusThread` in [bin/guiv4_prod.py](bin/guiv4_prod.py) to control/monitor the laser. No local package install needed on this side; it's a separate process talking EPICS CA, the same way the beamline's own `LA18L-*` PVs are reached.
+
+> **Note**: `requirements.txt`, `requirements-windows.txt`, and `uv.lock` still list `requests`/`httpx` as of this doc update — they were pyproject.toml-derived and need regenerating (`uv lock` / `uv export`) now that direct REST calls to Carbide have been removed.
 
 ## Installation
 
@@ -166,9 +168,7 @@ The production entry point is [bin/guiv4_prod.py](bin/guiv4_prod.py) (currently 
 
 - **[config.yaml](config.yaml)** — BlueAPI `env.sources` (`dodal.beamlines.aithre`, `mx_bluesky.beamlines.aithre_lasershaping`) and the STOMP broker used by the worker.
 - **Beamline PVs** — all EPICS PVs are collected in [bin/pv.py](bin/pv.py). Update that file if a PV name changes rather than editing the GUI modules.
-- **Endpoints** — hard-coded in [bin/guiv4_prod.py:143-144](bin/guiv4_prod.py#L143-L144):
-  - OAV stream: `http://bl23i-ea-serv-01.diamond.ac.uk:8080/OAV.mjpg.mjpg`
-  - Laser REST: `http://172.23.171.207:20010`
+- **Endpoints** — OAV stream hard-coded in [bin/guiv4_prod.py](bin/guiv4_prod.py) as `OAVADDRESS`: `http://bl23i-ea-serv-01.diamond.ac.uk:8080/OAV.mjpg.mjpg`. Carbide laser control no longer has a hard-coded endpoint — it goes through the `CARBIDE:*` PVs in [bin/pv.py](bin/pv.py), served by wherever the `carbide-fastcs` IOC is deployed.
 
 ## Hardware & services
 
@@ -178,7 +178,7 @@ The production entry point is [bin/guiv4_prod.py](bin/guiv4_prod.py) (currently 
 | OAV camera (Alvium 1240M) | MJPEG + EPICS `LA18L-DI-OAV-01:*` | [bin/guiv4_prod.py](bin/guiv4_prod.py) |
 | Sample robot | EPICS (`LA18L-MO-ROBOT-01:*`) | [bin/pv.py](bin/pv.py) |
 | High-mag optics | EPICS (`LA18L-MO-LSR-01:ZOOM` / `:FOCUS`) | [bin/pv.py](bin/pv.py) |
-| Carbide / Pharos laser | REST (see [CarbideRestApi.html](CarbideRestApi.html)) | [bin/laserControl.py](bin/laserControl.py), [bin/laserControlAsync.py](bin/laserControlAsync.py) |
+| Carbide laser | EPICS PVs (`CARBIDE:*`, served by [carbide-fastcs](https://github.com/armin306/carbide-fastcs); vendor REST API documented in [CarbideRestApi.html](CarbideRestApi.html)) | [bin/pv.py](bin/pv.py), [bin/guiv4_prod.py](bin/guiv4_prod.py) (`commandLaser`, `LaserStatusThread`) |
 | RTC6 galvo scanhead | `rtc6-fastcs` (imports `cut_shapes`) | guarded by `--nortc6` |
 | Bluesky plans | `mx_bluesky.beamlines.aithre_lasershaping` | guarded by `--bluesky` |
 | BlueAPI worker | REST (`BlueapiClient` + STOMP) | [config.yaml](config.yaml) |
@@ -226,7 +226,7 @@ The in-code version string is set in [bin/guiv4_prod.py](bin/guiv4_prod.py) (`ve
   pyuic5 bin/guiv4_3_0.ui -o bin/gui_4_3_0.py
   ```
 - **Linting / formatting** — `ruff` is listed as a dependency in [pyproject.toml](pyproject.toml); the repo badge advertises `black` style.
-- **Logging** — logs go to `./DDMMYYYY.log` in the current working directory plus stdout. `httpx` / `httpcore` loggers are pinned at `WARNING` to keep the REST chatter out of the log.
+- **Logging** — logs go to `./DDMMYYYY.log` in the current working directory plus stdout.
 - **Asset paths** — always construct asset paths relative to `__file__` or through the `_AssetQPixmap` shim so the code works both under `python bin/guiv4_prod.py` and inside the frozen EXE.
 - **Legacy code** — [emerita/](emerita/) and [testing/](testing/) are kept for archaeology. Don't add new code there.
 

@@ -41,9 +41,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-
 if platform.system() == "Windows":
     logger.info("Windows detected — disabling RTC6 (unsupported on Windows)")
 
@@ -86,8 +83,6 @@ import numpy as np
 import time
 from gui_4_3_0 import Ui_MainWindow
 import asyncio
-import laserControl as lc
-import httpx
 from qasync import QEventLoop
 
 import warnings
@@ -141,7 +136,6 @@ else:
 version = "4.3.0"
 logger.info(f"Aithre - Version {version}")
 OAVADDRESS = "http://bl23i-ea-serv-01.diamond.ac.uk:8080/OAV.mjpg.mjpg"
-LASERENDPOINT = "http://172.23.171.207:20010" # this is going to change soon!
 # Set grid/beam position/scale.
 line_width = 2
 line_spacing = 115  # depends on pixel size, 60 for MANTA507B
@@ -320,7 +314,7 @@ class RBVThread(QtCore.QThread):
 
 
 class LaserStatusThread(QtCore.QThread):
-    """Thread to periodically fetch and emit laser status from a REST API.
+    """Thread to periodically fetch and emit laser status from carbide-fastcs PVs.
     """
     statusUpdate = QtCore.pyqtSignal(dict)
 
@@ -328,61 +322,36 @@ class LaserStatusThread(QtCore.QThread):
         """Initializes the LaserStatusThread with default parameters.
         """
         super().__init__()
-        self.endpoint = LASERENDPOINT
         self.interval = 500
         self._is_running = True
-        self.endpoints = {
-            "IsOutputEnabled": f"{self.endpoint}/v1/Basic/IsOutputEnabled",
-            "ActualShutterState": f"{self.endpoint}/v1/Basic/ActualShutterState",
-            "ActualOutputFrequency": f"{self.endpoint}/v1/Basic/ActualOutputFrequency",
-            "ActualAttenuatorPercentage": f"{self.endpoint}/v1/Basic/ActualAttenuatorPercentage",
-            "ActualPpDivider": f"{self.endpoint}/v1/Basic/ActualPpDivider",
-            "ActualStateName": f"{self.endpoint}/v1/Basic/ActualStateName",
+
+    def fetchStatus(self):
+        """Fetches the current laser status from carbide-fastcs PVs.
+
+        Returns:
+            dict: A dictionary with status field names as keys and their corresponding values.
+        """
+        return {
+            "IsOutputEnabled": str(ca.caget(pv.carbide_status_is_output_enabled)),
+            "ActualShutterState": str(ca.caget(pv.carbide_basic_actual_shutter_state)),
+            "ActualOutputFrequency": str(
+                ca.caget(pv.carbide_basic_actual_output_frequency)
+            ),
+            "ActualAttenuatorPercentage": str(
+                ca.caget(pv.carbide_basic_actual_attenuator_percentage)
+            ),
+            "ActualPpDivider": str(ca.caget(pv.carbide_basic_actual_pp_divider)),
+            "ActualStateName": str(ca.caget(pv.carbide_status_actual_state_name)),
         }
-
-    async def fetchStatus(self):
-        """Fetches the status from all defined endpoints asynchronously.
-
-        Returns:
-            dict: A dictionary with endpoint names as keys and their corresponding fetched values.
-        """
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            tasks = []
-            for name, url in self.endpoints.items():
-                tasks.append(self.fetchEndpoint(client, name, url))
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            return dict(results)
-
-    async def fetchEndpoint(self, client, name, url):
-        """Fetches the status from a single endpoint.
-
-        Args:
-            client (httpx.AsyncClient): The HTTP client to use for the request.
-            name (str): Name of the endpoint.
-            url (str): URL of the endpoint.
-
-        Returns:
-            tuple: A tuple containing the endpoint name and its fetched value or error message.
-        """
-        try:
-            response = await client.get(url)
-            if response.status_code == 200:
-                return (name, response.text.strip())
-            return (name, f"Error: {response.status_code}")
-        except Exception as e:
-            return (name, f"Error: {str(e)}")
 
     def run(self):
         """Main loop for fetching laser status.
-        Periodically fetches laser status from the REST API and emits it.
+        Periodically fetches laser status from carbide-fastcs PVs and emits it.
         """
         logger.info("LaserStatusThread started")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
         while self._is_running:
             try:
-                status_dict = loop.run_until_complete(self.fetchStatus())
+                status_dict = self.fetchStatus()
                 self.statusUpdate.emit(status_dict)
             except Exception as e:
                 logger.error(f"Error fetching status: {str(e)}")
@@ -509,14 +478,14 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             status_dict (dict): A dictionary containing laser status information.
         """
-        if status_dict["IsOutputEnabled"] == "true":
+        if status_dict["IsOutputEnabled"] == "Enabled":
             self.ui.labOUTPUT.setStyleSheet("background-color: green")
         else:
             self.ui.labOUTPUT.setStyleSheet("background-color: red")
 
-        if status_dict["ActualShutterState"] == '"Opened"':
+        if status_dict["ActualShutterState"] == "Opened":
             self.ui.labEMISSION.setStyleSheet("background-color: green")
-        elif status_dict["ActualShutterState"] == '"Closed"':
+        elif status_dict["ActualShutterState"] == "Closed":
             self.ui.labEMISSION.setStyleSheet("background-color: red")
         else:
             self.ui.labEMISSION.setStyleSheet("background-color: yellow")
@@ -564,27 +533,27 @@ class MainWindow(QtWidgets.QMainWindow):
                            "SetDivider", "SetAttenuator", "Startup", and "Standby".
         """
         logger.info(f"Laser: Sending command '{command}'")
-        laser = lc.carbide(endpoint=LASERENDPOINT)
         if command == "Enable":
             logger.info("Laser: Enabling output")
-            laser.changeOutput(state="enable")
+            ca.caput(pv.carbide_actions_enable_output, 1, True)
         elif command == "Disable":
             logger.info("Laser: Disabling output")
-            laser.changeOutput(state="close")
+            ca.caput(pv.carbide_actions_close_output, 1, True)
         elif command == "SetDivider":
             divider = int(self.ui.spinBoxDivider.value())
             logger.info(f"Laser: Setting divider to {divider}")
-            laser.setPpDivider(divider=divider)
+            ca.caput(pv.carbide_basic_target_pp_divider, divider)
         elif command == "SetAttenuator":
             percentage = float(self.ui.doubleSpinBoxAttenuator.value())
             logger.info(f"Laser: Setting attenuator to {percentage}%")
-            laser.setAttenuatorPercentage(percentage=percentage)
+            ca.caput(pv.carbide_basic_target_attenuator_percentage, percentage)
         elif command == "Startup":
             logger.info("Laser: Startup")
-            laser.selectAndApplyPreset(preset="5")
+            ca.caput(pv.carbide_basic_selected_preset_index, 5)
+            ca.caput(pv.carbide_actions_apply_selected_preset, 1, True)
         elif command == "Standby":
             logger.info("Laser: Standby")
-            laser.goToStandby()
+            ca.caput(pv.carbide_actions_go_to_standby, 1, True)
 
 
     def loadNextPin(self):
