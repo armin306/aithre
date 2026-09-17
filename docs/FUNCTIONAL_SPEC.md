@@ -342,7 +342,62 @@ action:
 
 ---
 
-## 8. Open questions / extension points
+## 8. Direction for upcoming work
 
-*(left intentionally blank — for Armin to fill in with direction on the
-upcoming hardware integrations)*
+Decisions from Armin, captured as they come in (2026-09-17 onward).
+
+### Drop Windows support
+
+**Decision (2026-09-17)**: Aithre will run exclusively on Linux going
+forward. Windows is no longer a supported target.
+
+Consequences this implies for the codebase described in §6 (not yet
+acted on):
+- `requirements-windows.txt`, `aithre.spec` (PyInstaller spec), and the
+  `windows` branch/CI workflow (`build-windows.yml`, §6) become
+  removable.
+- The `platform.system() == "Windows"` checks that force `--nortc6`-
+  equivalent behavior and disable RTC6 (L25-26) become dead code once
+  Windows is no longer a real execution target.
+- The "vendor-software workstation" mode described in the README
+  (Windows machine talking to vendor laser software directly, RTC6/
+  Bluesky excluded) needs a decision on where that workflow goes, if
+  it's still needed at all — worth clarifying with Armin whether that
+  use case disappears entirely or moves onto Linux too.
+- `branches and versioning` in the README (`windows` as default branch,
+  `linux` as production) will need updating — presumably `linux`
+  becomes the sole/default branch.
+
+### Carbide laser: migrate off direct REST onto carbide-fastcs
+
+**Decision (2026-09-17, already in progress)**: the direct-REST Carbide
+laser control described in §3.6/§5 (`laserControl.py`,
+`commandLaser`/`LaserStatusThread` hitting `172.23.171.207:20010`
+directly) is being replaced with EPICS PVs served by a new
+[carbide-fastcs](https://github.com/armin306/carbide-fastcs) FastCS IOC
+— the same pattern RTC6 status already uses (`RTC6ETH:*` PVs, §3.5).
+
+This is not just planned - it's already implemented on the
+`carbide-fastcs-migration` branch (pushed to `armin306/aithre`, not yet
+merged into `linux`):
+- `commandLaser` rewritten to `ca.caput` against new `CARBIDE:ACTIONS:*`/
+  `CARBIDE:BASIC:*` PVs instead of instantiating `laserControl.carbide(...)`.
+- `LaserStatusThread` rewritten from an async `httpx` polling loop to
+  synchronous `ca.caget` polling (matching `RBVThread`'s existing
+  pattern), against `CARBIDE:STATUS:*`/`CARBIDE:BASIC:*`.
+- `laserControl.py`/`laserControlAsync.py` removed (both fully dead
+  after the migration).
+- A real type bug was found and fixed in `carbide-fastcs` itself along
+  the way: `ActualShutterState` is a string (`"Opened"`/`"Closed"` per
+  the vendor API docs), not the int it was wired up as - caught by
+  cross-referencing this GUI's own working comparisons.
+
+**Still blocking before this can merge**: untested against a running
+`carbide-fastcs` IOC or real/emulated laser (only unit tests + Python
+compile-checks so far), and the IOC itself needs the controls/IT group
+to deploy it (Armin can't self-install) - see the deployment-questions
+discussion from earlier this session. Once both are resolved, this
+branch is ready to be reviewed/merged.
+
+*(more to come — this section will keep growing with Armin's direction
+on the upcoming hardware integrations)*
