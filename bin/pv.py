@@ -96,17 +96,21 @@ zoom_dud = "LA18L-DI-ZOOM-01:IDONTEXIST"
 rtc6eth_info_is_acquired = "RTC6ETH:INFO:IsAcquired"
 rtc6eth_control_markspeed = "RTC6ETH:CONTROL:MarkSpeed"
 
-# Carbide laser (carbide-fastcs) - see https://github.com/armin306/carbide-fastcs
-carbide_status_actual_state_name = "CARBIDE:STATUS:ActualStateName"
-carbide_status_is_output_enabled = "CARBIDE:STATUS:IsOutputEnabled"
-carbide_basic_actual_shutter_state = "CARBIDE:BASIC:ActualShutterState"
-carbide_basic_actual_output_frequency = "CARBIDE:BASIC:ActualOutputFrequency"
-carbide_basic_actual_attenuator_percentage = "CARBIDE:BASIC:ActualAttenuatorPercentage"
-carbide_basic_actual_pp_divider = "CARBIDE:BASIC:ActualPpDivider"
-carbide_basic_selected_preset_index = "CARBIDE:BASIC:SelectedPresetIndex"
-carbide_basic_target_attenuator_percentage = "CARBIDE:BASIC:TargetAttenuatorPercentage"
-carbide_basic_target_pp_divider = "CARBIDE:BASIC:TargetPpDivider"
-carbide_actions_enable_output = "CARBIDE:ACTIONS:EnableOutput"
-carbide_actions_close_output = "CARBIDE:ACTIONS:CloseOutput"
-carbide_actions_go_to_standby = "CARBIDE:ACTIONS:GoToStandby"
-carbide_actions_apply_selected_preset = "CARBIDE:ACTIONS:ApplySelectedPreset"
+# Carbide laser (fastcs-carbide) - see https://github.com/armin306/fastcs-carbide
+carbide_status_actual_state_name = "LA18L-EA-CARB-01:STATUS:ActualStateName"
+carbide_status_is_output_enabled = "LA18L-EA-CARB-01:STATUS:IsOutputEnabled"
+carbide_basic_actual_shutter_state = "LA18L-EA-CARB-01:BASIC:ActualShutterState"
+carbide_basic_actual_output_frequency = "LA18L-EA-CARB-01:BASIC:ActualOutputFrequency"
+carbide_basic_actual_attenuator_percentage = (
+    "LA18L-EA-CARB-01:BASIC:ActualAttenuatorPercentage"
+)
+carbide_basic_actual_pp_divider = "LA18L-EA-CARB-01:BASIC:ActualPpDivider"
+carbide_basic_selected_preset_index = "LA18L-EA-CARB-01:BASIC:SelectedPresetIndex"
+carbide_basic_target_attenuator_percentage = (
+    "LA18L-EA-CARB-01:BASIC:TargetAttenuatorPercentage"
+)
+carbide_basic_target_pp_divider = "LA18L-EA-CARB-01:BASIC:TargetPpDivider"
+carbide_actions_enable_output = "LA18L-EA-CARB-01:ACTIONS:EnableOutput"
+carbide_actions_close_output = "LA18L-EA-CARB-01:ACTIONS:CloseOutput"
+carbide_actions_go_to_standby = "LA18L-EA-CARB-01:ACTIONS:GoToStandby"
+carbide_actions_apply_selected_preset = "LA18L-EA-CARB-01:ACTIONS:ApplySelectedPreset"
