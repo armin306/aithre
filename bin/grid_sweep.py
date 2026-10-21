@@ -39,7 +39,50 @@ import numpy as np
 
 # large enough for a 4024 x 3036 16-bit frame over Channel Access
 os.environ.setdefault("EPICS_CA_MAX_ARRAY_BYTES", str(64 * 1024 * 1024))
-import epics  # noqa: E402
+try:
+    import epics  # pyepics
+except ImportError:
+    epics = None
+
+
+class _CaTools:
+    """Fallback when pyepics is missing: the EPICS caget/caput command-line tools, as in control.py.
+
+    Enough for the TIFF writer; the array writer needs pyepics to read whole frames.
+    """
+
+    @staticmethod
+    def caget(name, timeout=5, as_string=False, count=None):
+        import subprocess
+
+        cmd = ["caget", "-t", "-w", str(timeout)] + (["-S"] if as_string else ["-n"]) + [name]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        value = result.stdout.strip()
+        if as_string:
+            return value
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+    @staticmethod
+    def caput(name, value, wait=False, timeout=60):
+        import subprocess
+
+        cmd = ["caput", "-t"]
+        if wait:
+            cmd += ["-c", "-w", str(timeout)]
+        if isinstance(value, str):
+            cmd += ["-S"]  # char waveform, for example FilePath and FileName
+        result = subprocess.run(cmd + [name, str(value)], capture_output=True, text=True)
+        return 1 if result.returncode == 0 else None
+
+
+if epics is None:
+    print("pyepics not found, using the caget/caput command-line tools (install pyepics for --writer array)")
+    epics = _CaTools
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pv  # noqa: E402
@@ -229,6 +272,8 @@ def main():
         parser.error("omega sweep needs --start, --stop and --step")
     if args.sweep == "focus" and args.step is None:
         parser.error("focus sweep needs --step (um)")
+    if args.writer == "array" and epics is _CaTools:
+        parser.error("--writer array needs pyepics (pip install pyepics); use --writer tiff instead")
     if args.writer == "tiff" and not args.ioc_dir and not args.dry_run:
         parser.error("--writer tiff needs --ioc-dir (or use --writer array)")
     if args.sweep == "background":
