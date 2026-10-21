@@ -14,7 +14,8 @@ Sweeps (see em-grid-image-collection-tasks.md):
     background  N frames at the current position, no motion (sweep F)
 
 Frames are written either by the OAV TIFF plugin on the IOC host
-(--writer tiff, default) or read from the ARR plugin and saved locally
+(--writer tiff, default) or HDF5 plugin (--writer hdf5) on the IOC host, or read
+from the ARR plugin and saved locally
 (--writer array). The MJPEG stream is never used, as it is JPEG-compressed.
 
 The laser must be closed or in standby. All moves are relative to the
@@ -179,7 +180,8 @@ class FrameWriter:
         self.local_dir = local_dir
         self.ioc_dir = ioc_dir
         self.dry_run = dry_run
-        self.plugin = OAV + ("TIFF:" if mode == "tiff" else "ARR:")
+        self.plugin = OAV + {"tiff": "TIFF:", "hdf5": "HDF5:", "array": "ARR:"}[mode]
+        self.ext = ".h5" if mode == "hdf5" else ".tif"
 
     def setup(self):
         if self.dry_run:
@@ -190,12 +192,12 @@ class FrameWriter:
         if (width, height) != FULL_SIZE:
             print(f"WARNING: {self.plugin} receives {width} x {height}, not full resolution {FULL_SIZE}. "
                   "Check its NDArrayPort and any ROI/binning upstream.")
-        if self.mode == "tiff":
+        if self.mode in ("tiff", "hdf5"):
             put(self.plugin + "CreateDirectory", -1)  # create the sweep folder on the IOC host
             put(self.plugin + "FilePath", self.ioc_dir)
             if int(get(self.plugin + "FilePathExists_RBV")) != 1:
                 raise RuntimeError(f"IOC cannot see directory {self.ioc_dir}")
-            put(self.plugin + "FileTemplate", "%s%s.tif")
+            put(self.plugin + "FileTemplate", "%s%s" + self.ext)
             put(self.plugin + "FileWriteMode", 1)  # Capture: each save grabs the next frame and writes it
             put(self.plugin + "NumCapture", 1)
             put(self.plugin + "AutoSave", 1)
@@ -228,18 +230,18 @@ class FrameWriter:
 
     def save(self, stem):
         if self.dry_run:
-            return f"{stem}.tif"
+            return stem + self.ext
         try:
             self.wait_fresh_frame(timeout=5)
         except RuntimeError:
             print(f"  {self.plugin} stopped receiving frames, reconnecting")
             self.reconnect()
-        if self.mode == "tiff":
+        if self.mode in ("tiff", "hdf5"):
             put(self.plugin + "FileName", stem)
             put(self.plugin + "Capture", 1)  # completes once the frame is captured and written
             if int(get(self.plugin + "WriteStatus")) != 0:
-                raise RuntimeError(f"TIFF write failed: {epics.caget(self.plugin + 'WriteMessage', as_string=True)}")
-            return f"{stem}.tif"
+                raise RuntimeError(f"{self.plugin} write failed: {epics.caget(self.plugin + 'WriteMessage', as_string=True)}")
+            return stem + self.ext
         width = int(get(self.plugin + "ArraySize0_RBV"))
         height = int(get(self.plugin + "ArraySize1_RBV"))
         data = epics.caget(self.plugin + "ArrayData", count=width * height, timeout=10)
@@ -350,7 +352,7 @@ def main():
     parser.add_argument("--offsets", type=float, nargs="+", default=[200, 500], help="offset sweep distances, um")
     parser.add_argument("--frames", type=int, default=3, help="background frame count")
     parser.add_argument("--settle", type=float, default=0.3, help="wait after each move, s")
-    parser.add_argument("--writer", choices=["tiff", "array"], default="tiff")
+    parser.add_argument("--writer", choices=["tiff", "hdf5", "array"], default="tiff")
     parser.add_argument("--ioc-dir", help="directory as seen by the OAV IOC (tiff writer)")
     parser.add_argument("--out", default=".", help="local parent directory for the sweep folder")
     parser.add_argument("--beampos", default="1644,1232", help="beamX,beamY in use, recorded in notes.txt")
@@ -364,9 +366,9 @@ def main():
     if args.sweep == "focus" and args.step is None:
         parser.error("focus sweep needs --step (um)")
     if args.writer == "array" and epics is _CaTools:
-        parser.error("--writer array needs pyepics (pip install pyepics); use --writer tiff instead")
-    if args.writer == "tiff" and not args.ioc_dir and not args.dry_run:
-        parser.error("--writer tiff needs --ioc-dir (or use --writer array)")
+        parser.error("--writer array needs pyepics (pip install pyepics); use --writer tiff or hdf5 instead")
+    if args.writer in ("tiff", "hdf5") and not args.ioc_dir and not args.dry_run:
+        parser.error("--writer tiff/hdf5 needs --ioc-dir (or use --writer array)")
     if args.sweep == "background":
         print("Background: remove the grid from view first (or move it out of the field by hand).")
 
