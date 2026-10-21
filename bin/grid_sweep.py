@@ -202,6 +202,9 @@ class FrameWriter:
             put(self.plugin + "FileWriteMode", 1)  # Capture: each save grabs the next frame and writes it
             put(self.plugin + "NumCapture", 1)
             put(self.plugin + "AutoSave", 1)
+            if self.mode == "hdf5":
+                # without LazyOpen, Capture needs an earlier array of the same size and type (ADCore NDPluginFile docs)
+                put(self.plugin + "LazyOpen", 1)
             put(self.plugin + "AutoIncrement", 0)
 
     def reconnect(self):
@@ -311,17 +314,18 @@ def check_camera():
     for field in ["Acquire", "ImageMode", "TriggerMode", "ArrayCallbacks", "ArraySize0_RBV", "ArraySize1_RBV",
                   "DataType_RBV", "PortName_RBV"]:
         show(OAV + "CAM:" + field)
-    for plugin in ["TIFF:", "ARR:"]:
+    for plugin in ["TIFF:", "HDF5:", "ARR:"]:
         print(f"Plugin {plugin} (NDArrayPort should be the camera port above; EnableCallbacks = Enable)")
         for field in ["EnableCallbacks", "NDArrayPort", "BlockingCallbacks", "ArraySize0_RBV", "ArraySize1_RBV",
-                      "DroppedArrays_RBV", "MinCallbackTime", "QueueSize", "QueueFree", "PortName_RBV"]:
+                      "DroppedArrays_RBV", "MinCallbackTime", "QueueSize", "QueueFree", "PortName_RBV",
+                      "NDArrayAddress", "MaxByteRate", "ExecutionTime_RBV"]:
             show(OAV + plugin + field)
-        if plugin == "TIFF:":
+        if plugin in ("TIFF:", "HDF5:"):
             for field in ["FilePath", "FilePathExists_RBV", "FileName", "FileTemplate", "FileWriteMode",
                           "NumCapture", "AutoSave", "WriteStatus", "WriteMessage", "FullFileName_RBV"]:
                 show(OAV + plugin + field)
     print("Other plugins in the chain (which source does the working MJPEG stream use?)")
-    for plugin in ["MJPG:", "ROI:", "PROC:", "OVER:", "HDF5:"]:
+    for plugin in ["MJPG:", "ROI:", "PROC:", "OVER:"]:
         for field in ["EnableCallbacks", "NDArrayPort", "ArraySize0_RBV", "ArraySize1_RBV"]:
             show(OAV + plugin + field)
     print("Frame counters over 2 s (each must increase):")
