@@ -262,6 +262,61 @@ class FrameWriter:
         return file_name
 
 
+class MjpegWriter:
+    """Saves frames from the OAV MJPEG stream, the same stream aithre displays.
+
+    No PV is written, so the IOC's file plugins are not involved. Frames are JPEG-compressed
+    by the MJPG plugin; set LA18L-DI-OAV-01:MJPG:Quality to 100 to keep the loss small.
+    """
+
+    def __init__(self, url, local_dir, dry_run, skip=2):
+        self.url = url
+        self.local_dir = local_dir
+        self.dry_run = dry_run
+        self.skip = skip  # frames to discard after a move, so the saved one was exposed after it
+
+    def setup(self):
+        if self.dry_run:
+            return
+        quality = epics.caget(OAV + "MJPG:Quality", timeout=5)
+        if quality is not None and float(quality) < 100:
+            print(f"Note: MJPG:Quality is {quality}; 100 gives the least JPEG loss")
+        self.grab()  # fail early if the stream cannot be read
+
+    def grab(self, timeout=20):
+        """Return the JPEG bytes of the frame after `skip` frames, read straight from the stream."""
+        from urllib.request import urlopen
+
+        buffer = b""
+        frames = 0
+        t0 = time.time()
+        with urlopen(self.url, timeout=timeout) as stream:
+            while time.time() - t0 < timeout:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                buffer += chunk
+                while True:
+                    start = buffer.find(b"\xff\xd8")
+                    end = buffer.find(b"\xff\xd9", start + 2) if start >= 0 else -1
+                    if end < 0:
+                        break
+                    jpeg = buffer[start:end + 2]
+                    buffer = buffer[end + 2:]
+                    frames += 1
+                    if frames > self.skip:
+                        return jpeg
+        raise RuntimeError(f"no frames from {self.url}")
+
+    def save(self, stem):
+        if self.dry_run:
+            return stem + ".jpg"
+        file_name = stem + ".jpg"
+        with open(os.path.join(self.local_dir, file_name), "wb") as f:
+            f.write(self.grab())
+        return file_name
+
+
 def build_steps(args, start):
     """List of (file stem, omega, u, v, w) for the chosen sweep."""
     omega0 = start["omega_deg"]
@@ -356,7 +411,10 @@ def main():
     parser.add_argument("--offsets", type=float, nargs="+", default=[200, 500], help="offset sweep distances, um")
     parser.add_argument("--frames", type=int, default=3, help="background frame count")
     parser.add_argument("--settle", type=float, default=0.3, help="wait after each move, s")
-    parser.add_argument("--writer", choices=["tiff", "hdf5", "array"], default="hdf5")
+    parser.add_argument("--writer", choices=["mjpeg", "tiff", "hdf5", "array"], default="mjpeg",
+                        help="mjpeg (default): save frames from the OAV MJPEG stream, no PV writes")
+    parser.add_argument("--mjpeg-url", default="http://bl23i-ea-serv-01.diamond.ac.uk:8080/OAV.mjpg.mjpg",
+                        help="OAV MJPEG stream, as in aithre")
     parser.add_argument("--ioc-dir", help="directory as seen by the OAV IOC (tiff writer)")
     parser.add_argument("--out", default=".", help="local parent directory for the sweep folder")
     parser.add_argument("--beampos", default="1644,1232", help="beamX,beamY in use, recorded in notes.txt")
@@ -384,7 +442,7 @@ def main():
 
     folder = f"{datetime.now():%Y%m%d}_{args.grid.replace(' ', '-').replace('/', '-')}_{args.temp}_{args.name}"
     local_dir = os.path.join(args.out, folder)
-    ioc_dir = os.path.join(args.ioc_dir, folder) if args.ioc_dir else None
+    ioc_dir = os.path.join(args.ioc_dir, folder) if args.ioc_dir and args.writer in ("tiff", "hdf5") else None
 
     print(f"{args.sweep} sweep, {len(steps)} images, into {folder}")
     print(f"Start: omega {start['omega_deg']:.3f}, X {start['stage_x']:.4f}, "
@@ -397,7 +455,10 @@ def main():
         os.makedirs(local_dir, exist_ok=True)
         if ioc_dir:
             os.makedirs(ioc_dir, exist_ok=True)  # works when the IOC directory is also mounted here
-    writer = FrameWriter(args.writer, local_dir, ioc_dir, args.dry_run)
+    if args.writer == "mjpeg":
+        writer = MjpegWriter(args.mjpeg_url, local_dir, args.dry_run)
+    else:
+        writer = FrameWriter(args.writer, local_dir, ioc_dir, args.dry_run)
     writer.setup()
 
     rows = []
