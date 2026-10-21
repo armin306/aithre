@@ -79,6 +79,12 @@ class _CaTools:
 
 
 if epics is None:
+    import shutil
+
+    if shutil.which("caget") is None or shutil.which("caput") is None:
+        sys.exit("Neither pyepics nor the caget/caput tools were found. Load EPICS first "
+                 "(at Diamond: 'module load epics' or 'module load controls_dev'), or run with "
+                 "a Python that has pyepics installed.")
     print("pyepics not found, using the caget/caput command-line tools (install pyepics for --writer array)")
     epics = _CaTools
 
