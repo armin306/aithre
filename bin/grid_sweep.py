@@ -35,8 +35,6 @@ import sys
 import time
 from datetime import datetime
 
-import numpy as np
-
 # large enough for a 4024 x 3036 16-bit frame over Channel Access
 os.environ.setdefault("EPICS_CA_MAX_ARRAY_BYTES", str(64 * 1024 * 1024))
 try:
@@ -56,7 +54,7 @@ class _CaTools:
         import subprocess
 
         cmd = ["caget", "-t", "-w", str(timeout)] + (["-S"] if as_string else ["-n"]) + [name]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         if result.returncode != 0 or not result.stdout.strip():
             return None
         value = result.stdout.strip()
@@ -76,7 +74,7 @@ class _CaTools:
             cmd += ["-c", "-w", str(timeout)]
         if isinstance(value, str):
             cmd += ["-S"]  # char waveform, for example FilePath and FileName
-        result = subprocess.run(cmd + [name, str(value)], capture_output=True, text=True)
+        result = subprocess.run(cmd + [name, str(value)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         return 1 if result.returncode == 0 else None
 
 
@@ -212,6 +210,8 @@ class FrameWriter:
         data = epics.caget(self.plugin + "ArrayData", count=width * height, timeout=10)
         if data is None:
             raise RuntimeError("could not read ARR:ArrayData")
+        import numpy as np
+
         image = np.asarray(data).reshape(height, width)
         image = image.astype(np.uint16 if image.max() > 255 else np.uint8)
         import cv2 as cv
