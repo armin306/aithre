@@ -75,10 +75,16 @@ class _CaTools:
         cmd = ["caput", "-t"]
         if wait:
             cmd += ["-c", "-w", str(timeout)]
-        if isinstance(value, str):
-            cmd += ["-S"]  # char waveform, for example FilePath and FileName
-        result = subprocess.run(cmd + [name, str(value)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        return 1 if result.returncode == 0 else None
+
+        def run(args):
+            result = subprocess.run(args + [name, str(value)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True)
+            return result.returncode == 0 and "Error" not in result.stderr
+
+        # strings go to char waveforms (FilePath, FileName) with -S, or to string records (NDArrayPort) without
+        if isinstance(value, str) and run(cmd + ["-S"]):
+            return 1
+        return 1 if run(cmd) else None
 
 
 if epics is None:
