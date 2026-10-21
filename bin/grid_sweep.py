@@ -84,8 +84,26 @@ if epics is None:
     print("pyepics not found, using the caget/caput command-line tools (install pyepics for --writer array)")
     epics = _CaTools
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pv  # noqa: E402
+
+
+class pv:
+    """The PVs this script uses, copied from bin/pv.py so the script runs on its own."""
+
+    stage_x = "LA18L-MO-LSR-01:X"
+    stage_x_rbv = "LA18L-MO-LSR-01:X.RBV"
+    stage_y_rbv = "LA18L-MO-LSR-01:Y.RBV"
+    stage_z_rbv = "LA18L-MO-LSR-01:Z.RBV"
+    gonio_y = "LA18L-MO-LSR-01:SAMPY"
+    gonio_y_rbv = "LA18L-MO-LSR-01:SAMPY.RBV"
+    gonio_z = "LA18L-MO-LSR-01:SAMPZ"
+    gonio_z_rbv = "LA18L-MO-LSR-01:SAMPZ.RBV"
+    omega = "LA18L-MO-LSR-01:OMEGA"
+    omega_rbv = "LA18L-MO-LSR-01:OMEGA.RBV"
+    highmag_zoom_rbv = "LA18L-MO-LSR-01:ZOOM.RBV"
+    highmag_focus_rbv = "LA18L-MO-LSR-01:FOCUS.RBV"
+    oav_cam_acqtime_rbv = "LA18L-DI-OAV-01:CAM:AcquireTime_RBV"
+    oav_cam_gain_rbv = "LA18L-DI-OAV-01:CAM:Gain_RBV"
+
 
 OAV = "LA18L-DI-OAV-01:"
 FULL_SIZE = (4024, 3036)
