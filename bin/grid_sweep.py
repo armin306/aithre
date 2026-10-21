@@ -184,15 +184,7 @@ class FrameWriter:
     def setup(self):
         if self.dry_run:
             return
-        put(self.plugin + "EnableCallbacks", 1)
-        # re-write the source port: this makes the plugin reconnect to it, which fixes a plugin
-        # that is enabled and connected on paper but receives no frames
-        port = epics.caget(self.plugin + "NDArrayPort", as_string=True)
-        put(self.plugin + "NDArrayPort", port)
-        try:
-            self.wait_fresh_frame(timeout=10)
-        except RuntimeError:
-            raise RuntimeError(f"{self.plugin} receives no frames from {port}; run 'grid_sweep.py check'")
+        self.reconnect()
         width = int(get(self.plugin + "ArraySize0_RBV"))
         height = int(get(self.plugin + "ArraySize1_RBV"))
         if (width, height) != FULL_SIZE:
@@ -204,9 +196,25 @@ class FrameWriter:
             if int(get(self.plugin + "FilePathExists_RBV")) != 1:
                 raise RuntimeError(f"IOC cannot see directory {self.ioc_dir}")
             put(self.plugin + "FileTemplate", "%s%s.tif")
-            put(self.plugin + "FileWriteMode", 0)  # Single
-            put(self.plugin + "AutoSave", 0)
+            put(self.plugin + "FileWriteMode", 1)  # Capture: each save grabs the next frame and writes it
+            put(self.plugin + "NumCapture", 1)
+            put(self.plugin + "AutoSave", 1)
             put(self.plugin + "AutoIncrement", 0)
+
+    def reconnect(self):
+        """Enable the plugin and re-write its source port, so that it reconnects to it.
+
+        On the I23 OAV IOC the TIFF plugin has been seen to stop receiving frames while
+        still enabled and connected on paper; this restarts the flow.
+        """
+        port = epics.caget(self.plugin + "NDArrayPort", as_string=True)
+        put(self.plugin + "EnableCallbacks", 0)
+        put(self.plugin + "EnableCallbacks", 1)
+        put(self.plugin + "NDArrayPort", port)
+        try:
+            self.wait_fresh_frame(timeout=10)
+        except RuntimeError:
+            raise RuntimeError(f"{self.plugin} receives no frames from {port}; run 'grid_sweep.py check'")
 
     def wait_fresh_frame(self, frames=2, timeout=30):
         """Wait until the plugin has received `frames` new frames, so the image was exposed after the move."""
@@ -221,10 +229,14 @@ class FrameWriter:
     def save(self, stem):
         if self.dry_run:
             return f"{stem}.tif"
-        self.wait_fresh_frame()
+        try:
+            self.wait_fresh_frame(timeout=5)
+        except RuntimeError:
+            print(f"  {self.plugin} stopped receiving frames, reconnecting")
+            self.reconnect()
         if self.mode == "tiff":
             put(self.plugin + "FileName", stem)
-            put(self.plugin + "WriteFile", 1)
+            put(self.plugin + "Capture", 1)  # completes once the frame is captured and written
             if int(get(self.plugin + "WriteStatus")) != 0:
                 raise RuntimeError(f"TIFF write failed: {epics.caget(self.plugin + 'WriteMessage', as_string=True)}")
             return f"{stem}.tif"
@@ -304,7 +316,7 @@ def check_camera():
             show(OAV + plugin + field)
         if plugin == "TIFF:":
             for field in ["FilePath", "FilePathExists_RBV", "FileName", "FileTemplate", "FileWriteMode",
-                          "WriteStatus", "WriteMessage", "FullFileName_RBV"]:
+                          "NumCapture", "AutoSave", "WriteStatus", "WriteMessage", "FullFileName_RBV"]:
                 show(OAV + plugin + field)
     print("Other plugins in the chain (which source does the working MJPEG stream use?)")
     for plugin in ["MJPG:", "ROI:", "PROC:", "OVER:", "HDF5:"]:
