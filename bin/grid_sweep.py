@@ -205,15 +205,14 @@ class FrameWriter:
             put(self.plugin + "AutoIncrement", 0)
 
     def reconnect(self):
-        """Enable the plugin and re-write its source port, so that it reconnects to it.
+        """Make sure the plugin is enabled and receiving frames.
 
-        On the I23 OAV IOC the TIFF plugin has been seen to stop receiving frames while
-        still enabled and connected on paper; this restarts the flow.
+        Only EnableCallbacks is written. Toggling it or re-writing NDArrayPort stopped the
+        frame flow on the I23 OAV IOC (2026-10-21), so neither is done here.
         """
         port = epics.caget(self.plugin + "NDArrayPort", as_string=True)
-        put(self.plugin + "EnableCallbacks", 0)
-        put(self.plugin + "EnableCallbacks", 1)
-        put(self.plugin + "NDArrayPort", port)
+        if int(get(self.plugin + "EnableCallbacks")) != 1:
+            put(self.plugin + "EnableCallbacks", 1)
         try:
             self.wait_fresh_frame(timeout=10)
         except RuntimeError:
@@ -235,7 +234,7 @@ class FrameWriter:
         try:
             self.wait_fresh_frame(timeout=5)
         except RuntimeError:
-            print(f"  {self.plugin} stopped receiving frames, reconnecting")
+            print(f"  {self.plugin} received no new frame within 5 s, checking it is enabled")
             self.reconnect()
         if self.mode in ("tiff", "hdf5"):
             put(self.plugin + "FileName", stem)
