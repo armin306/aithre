@@ -179,6 +179,14 @@ class FrameWriter:
         if self.dry_run:
             return
         put(self.plugin + "EnableCallbacks", 1)
+        # re-write the source port: this makes the plugin reconnect to it, which fixes a plugin
+        # that is enabled and connected on paper but receives no frames
+        port = epics.caget(self.plugin + "NDArrayPort", as_string=True)
+        put(self.plugin + "NDArrayPort", port)
+        try:
+            self.wait_fresh_frame(timeout=10)
+        except RuntimeError:
+            raise RuntimeError(f"{self.plugin} receives no frames from {port}; run 'grid_sweep.py check'")
         width = int(get(self.plugin + "ArraySize0_RBV"))
         height = int(get(self.plugin + "ArraySize1_RBV"))
         if (width, height) != FULL_SIZE:
@@ -286,14 +294,18 @@ def check_camera():
     for plugin in ["TIFF:", "ARR:"]:
         print(f"Plugin {plugin} (NDArrayPort should be the camera port above; EnableCallbacks = Enable)")
         for field in ["EnableCallbacks", "NDArrayPort", "BlockingCallbacks", "ArraySize0_RBV", "ArraySize1_RBV",
-                      "DroppedArrays_RBV"]:
+                      "DroppedArrays_RBV", "MinCallbackTime", "QueueSize", "QueueFree", "PortName_RBV"]:
             show(OAV + plugin + field)
         if plugin == "TIFF:":
             for field in ["FilePath", "FilePathExists_RBV", "FileName", "FileTemplate", "FileWriteMode",
                           "WriteStatus", "WriteMessage", "FullFileName_RBV"]:
                 show(OAV + plugin + field)
+    print("Other plugins in the chain (which source does the working MJPEG stream use?)")
+    for plugin in ["MJPG:", "ROI:", "PROC:", "OVER:", "HDF5:"]:
+        for field in ["EnableCallbacks", "NDArrayPort", "ArraySize0_RBV", "ArraySize1_RBV"]:
+            show(OAV + plugin + field)
     print("Frame counters over 2 s (each must increase):")
-    counters = [OAV + "CAM:ArrayCounter_RBV", OAV + "TIFF:ArrayCounter_RBV", OAV + "ARR:ArrayCounter_RBV"]
+    counters = [OAV + p + "ArrayCounter_RBV" for p in ["CAM:", "TIFF:", "ARR:", "MJPG:", "ROI:", "HDF5:"]]
     before = [epics.caget(c, timeout=5) for c in counters]
     time.sleep(2)
     after = [epics.caget(c, timeout=5) for c in counters]
