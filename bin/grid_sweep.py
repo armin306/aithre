@@ -4,6 +4,9 @@
 Each run writes one folder with full-resolution lossless frames, a
 positions.csv of motor readbacks per frame, and a notes.txt.
 
+Run "python grid_sweep.py check" first: it prints the camera and file plugin
+state and whether frames arrive, without moving anything.
+
 Sweeps (see em-grid-image-collection-tasks.md):
     omega       omega from --start to --stop in --step (sweeps A, B, C)
     focus       sample moved along the beam, +-RANGE um in STEP um (sweep D)
@@ -268,7 +271,41 @@ def restore(start, dry_run):
     move_to(start, start["omega_deg"], 0, 0, 0, dry_run)
 
 
+def check_camera():
+    """Print the OAV state that frame saving depends on, to find where acquisition stalls."""
+
+    def show(name):
+        value = epics.caget(name, timeout=5, as_string=True)
+        print(f"  {name:45s} {value if value is not None else '<no connection>'}")
+        return value
+
+    print("Camera (expected: Acquire = Acquire/1, ImageMode = Continuous, TriggerMode = Off)")
+    for field in ["Acquire", "ImageMode", "TriggerMode", "ArrayCallbacks", "ArraySize0_RBV", "ArraySize1_RBV",
+                  "DataType_RBV", "PortName_RBV"]:
+        show(OAV + "CAM:" + field)
+    for plugin in ["TIFF:", "ARR:"]:
+        print(f"Plugin {plugin} (NDArrayPort should be the camera port above; EnableCallbacks = Enable)")
+        for field in ["EnableCallbacks", "NDArrayPort", "BlockingCallbacks", "ArraySize0_RBV", "ArraySize1_RBV",
+                      "DroppedArrays_RBV"]:
+            show(OAV + plugin + field)
+        if plugin == "TIFF:":
+            for field in ["FilePath", "FilePathExists_RBV", "FileName", "FileTemplate", "FileWriteMode",
+                          "WriteStatus", "WriteMessage", "FullFileName_RBV"]:
+                show(OAV + plugin + field)
+    print("Frame counters over 2 s (each must increase):")
+    counters = [OAV + "CAM:ArrayCounter_RBV", OAV + "TIFF:ArrayCounter_RBV", OAV + "ARR:ArrayCounter_RBV"]
+    before = [epics.caget(c, timeout=5) for c in counters]
+    time.sleep(2)
+    after = [epics.caget(c, timeout=5) for c in counters]
+    for name, b, a in zip(counters, before, after):
+        state = "OK" if (a is not None and b is not None and float(a) > float(b)) else "NOT INCREASING"
+        print(f"  {name:45s} {b} -> {a}  {state}")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "check":
+        check_camera()
+        return
     global args_settle
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep", choices=["omega", "focus", "offset", "background"])
