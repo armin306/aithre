@@ -14,7 +14,8 @@ Sweeps (see em-grid-image-collection-tasks.md):
     background  N frames at the current position, no motion (sweep F)
 
 Frames are written either by the OAV TIFF plugin on the IOC host
-(--writer tiff, default) or HDF5 plugin (--writer hdf5) on the IOC host, or read
+(--writer tiff) or HDF5 plugin (--writer hdf5, default; the TIFF plugin
+did not receive frames on the I23 OAV IOC) on the IOC host, or read
 from the ARR plugin and saved locally
 (--writer array). The MJPEG stream is never used, as it is JPEG-compressed.
 
@@ -352,7 +353,7 @@ def main():
     parser.add_argument("--offsets", type=float, nargs="+", default=[200, 500], help="offset sweep distances, um")
     parser.add_argument("--frames", type=int, default=3, help="background frame count")
     parser.add_argument("--settle", type=float, default=0.3, help="wait after each move, s")
-    parser.add_argument("--writer", choices=["tiff", "hdf5", "array"], default="tiff")
+    parser.add_argument("--writer", choices=["tiff", "hdf5", "array"], default="hdf5")
     parser.add_argument("--ioc-dir", help="directory as seen by the OAV IOC (tiff writer)")
     parser.add_argument("--out", default=".", help="local parent directory for the sweep folder")
     parser.add_argument("--beampos", default="1644,1232", help="beamX,beamY in use, recorded in notes.txt")
