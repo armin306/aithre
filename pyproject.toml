@@ -14,14 +14,19 @@ dependencies = [
     "httpx",
     "qasync",
     "ruff",
-    "bluesky",
-    "ophyd",
-    "ophyd-async",
-    "softioc",
     "rust>=1.3.1",
     "ipython>=8.32.0",
-    "mx-bluesky>=0.0.2",
-    "blueapi",
 ]
+
+[project.optional-dependencies]
+# Not used by the GUI yet; for Bluesky scripts and future integration
+bluesky = [
+    "bluesky>=1.15",
+    "ophyd-async>=0.21",
+    "softioc",
+    "mx-bluesky>=1.6.16",
+    "blueapi>=1.21",
+]
+
 [tool.setuptools]
 py-modules = []

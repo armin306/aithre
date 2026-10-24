@@ -8,8 +8,6 @@ from datetime import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dev", help="Development mode for running the GUI outside the lab.", action="store_true")
-parser.add_argument("--bluesky", help="Use Bluesky client instead of messy caput/get.", action="store_true")
-parser.add_argument("--blueapi", help="Option to use blueapi client instead/aswell as bluesky directly.", action="store_true")
 parser.add_argument("--rtc6", help="Acquire the RTC6 board. Off by default; not supported on Windows.", action="store_true")
 parser.add_argument("--beampos", help="Override beam position, format: X,Y (e.g. --beampos 1644,1232)", type=str, default=None)
 args = parser.parse_args()
@@ -93,50 +91,12 @@ from qasync import QEventLoop
 import warnings
 warnings.filterwarnings("ignore", message="sipPyTypeDict.*")
 
-if args.blueapi:
-    from blueapi.client.client import BlueapiClient
-    from blueapi.client.rest import BlueapiRestClient
-    from blueapi.cli.format import OutputFormat
-    from blueapi.worker import Task
-    from blueapi.config import ConfigLoader, ApplicationConfig
-    from pathlib import Path
-
-    bac = BlueapiClient(BlueapiRestClient())
-    plans = bac.get_plans()
-    OutputFormat.COMPACT.display(plans)
-
-    config_loader = ConfigLoader(ApplicationConfig)
-    config_file = Path("/dls/science/groups/i23/aithre/config.yaml")
-
-    while not config_file.is_file():
-        logger.error("Config file not found")
-        config_file = input("Please enter config filepath:\n")
-
-    config_loader.use_values_from_yaml(config_file)
-
 dev_mode = args.dev
 if dev_mode:
     logger.info("Running in development mode...")
 
 if not args.rtc6:
     logger.info("Running without RTC6 board acquisition")
-
-bluesky_mode = args.bluesky
-if bluesky_mode:
-    try:
-        from mx_bluesky.beamlines.aithre_lasershaping import goniometer_controls
-        from mx_bluesky.beamlines.aithre_lasershaping import beamline_safe
-        from mx_bluesky.beamlines.aithre_lasershaping.pin_tip_centring import aithre_pin_tip_centre
-        from dodal.devices.aithre_lasershaping import goniometer
-        from bluesky.run_engine import RunEngine
-        from dodal.beamlines import aithre
-        from ophyd_async.core import init_devices
-    except ImportError as e:
-        logger.error("Failed to import mx_bluesky module. Ensure it is installed and accessible.")
-        logger.error(f"ImportError: {e}")
-        sys.exit(1)
-else:
-    logger.info("Using dirty caput/get...")
 
 version = "4.3.0"
 logger.info(f"Aithre - Version {version}")
@@ -443,7 +403,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.start.clicked.connect(self.oavStart)
         self.ui.stop.clicked.connect(self.oavStop)
         self.ui.snapshot.clicked.connect(self.saveSnapshot)
-        self.ui.AutoCenter.clicked.connect(self.autoCenter)
+        # Auto-centring needs the Bluesky stack, which is not wired into the GUI yet
+        self.ui.AutoCenter.setEnabled(False)
+        self.ui.AutoCenter.setToolTip("Not available yet")
         # RBV updating connections thread
         logger.info("Starting RBVThread")
         RBVth = RBVThread()
@@ -590,20 +552,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def loadNextPin(self):
         pin_number = int(self.ui.spinToLoad.value())
         logger.info(f"Robot: Loading pin {pin_number}")
-        if bluesky_mode:
-            with init_devices():
-                gonio = aithre.goniometer()
-                robot = aithre.robot()
-
-            RE = RunEngine({})
-            goniometer.omega.stop()
-        else:
-            ca.caput(pv.robot_reset, 1, True)
-            time.sleep(3)
-            ca.caput(pv.robot_next_pin, pin_number)
-            time.sleep(3)
-            ca.caput(pv.robot_proc_load, 1, True)
-            logger.info(f"Robot: Load command sent for pin {pin_number}")
+        ca.caput(pv.robot_reset, 1, True)
+        time.sleep(3)
+        ca.caput(pv.robot_next_pin, pin_number)
+        time.sleep(3)
+        ca.caput(pv.robot_proc_load, 1, True)
+        logger.info(f"Robot: Load command sent for pin {pin_number}")
 
     def unloadPin(self):
         logger.info("Robot: Unloading pin")
@@ -624,13 +578,9 @@ class MainWindow(QtWidgets.QMainWindow):
         sys.exit()
 
     def returntozero(self):
-        if bluesky_mode:
-            logger.info("Bluesky - go to zero")
-            beamline_safe.go_to_zero(wait=False)
-        else:
-            logger.info("Moving all motors to zero")
-            for motor in [pv.gonio_y, pv.gonio_z, pv.stage_x, pv.stage_z, pv.omega]:
-                ca.caput(motor, 0)
+        logger.info("Moving all motors to zero")
+        for motor in [pv.gonio_y, pv.gonio_z, pv.stage_x, pv.stage_z, pv.omega]:
+            ca.caput(motor, 0)
 
     def handleZoom(self, zoomValue):
         """Handles the zoom level change from the slider.
@@ -650,11 +600,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ca.caput(pv.oav_cam_acqtime, exposure)
         ca.caput(pv.oav_cam_gain, gain)
 
-    def go_to_max():
-        bac.create_and_start_task(Task(name="go_to_furthest_maximum"))
     def jogSample(self, direction, amount=0.005):
 
-        if direction == "ZsPlus" or "ZsMinus" or "ZsZero":
+        if direction in ("ZsPlus", "ZsMinus", "ZsZero"):
             jogVal = float(self.ui.spinBoxZsJogAmount.value() / 1000)
             if direction == "ZsPlus":
                 logger.debug(f"Stage: Moving Z+ by {jogVal}")
@@ -665,18 +613,6 @@ class MainWindow(QtWidgets.QMainWindow):
             elif direction == "ZsZero":
                 logger.debug(f"Stage: Moving Z to zero")
                 ca.caput(pv.stage_z, float(0))
-
-        if args.blueapi:
-            bac.create_and_start_task(Task(
-                name="jog_sample",
-                params={"direction": direction, "increment_size": amount},
-            ))
-        if bluesky_mode:
-            with init_devices():
-                gonio = aithre.goniometer()
-            RE = RunEngine({})
-            RE(goniometer_controls.jog_sample(direction=direction, increment_size=amount, goniometer=gonio))
-
         else:
             jogVal = float(self.ui.spinBoxZJogAmount.value() / 1000)
             if direction == "right":
@@ -961,18 +897,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 logger.error(f"An error occurred while saving the image: {e}")
 
     def gonioRotate(self, amount):
-        if args.blueapi:
-            bac.create_and_start_task(
-                Task(name="rotate_gonio_relative", params={"value": amount})
-            )
+        gonio_current = float(ca.caget(pv.omega_rbv))
+        if amount == 0:
+            gonio_request = 0
         else:
-            gonio_current = float(ca.caget(pv.omega_rbv))
-            if amount == 0:
-                gonio_request = 0
-            else:
-                gonio_request = gonio_current + amount
-            logger.info(f"Moving gonio omega to {gonio_request}")
-            ca.caput(pv.omega, gonio_request)
+            gonio_request = gonio_current + amount
+        logger.info(f"Moving gonio omega to {gonio_request}")
+        ca.caput(pv.omega, gonio_request)
 
     def updateRBVs(self, rbvs):
         # stagex, gony, gonz, omega, oavexp, oavgain, currentsamp, goniosens, stagez, stagey
@@ -1001,20 +932,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ui.indicatorGonioSensor.setStyleSheet("background-color: green")
         else:
             self.ui.indicatorGonioSensor.setStyleSheet("background-color: red")
-
-    def autoCenter(self):
-        logger.info("Auto-centering pin tip")
-        from dodal.devices.oav.pin_image_recognition import PinTipDetection
-        with init_devices():
-            gonio = aithre.goniometer()
-            oav = aithre.oav()
-            p_t_d = PinTipDetection("LA18L-DI-OAV-01:", "pin_detect")
-
-        RE = RunEngine({})
-        RE(aithre_pin_tip_centre(gonio=gonio, oav=oav, pin_tip_detection=p_t_d, tip_offset_microns=0))
-        logger.info("Auto-center complete")
-    
-        return None
 
 
 if __name__ == "__main__":
